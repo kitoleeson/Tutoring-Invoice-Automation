@@ -102,7 +102,7 @@ def send_invoice_email(name, payer, email, pdf_path, cutoff_dates):
         lines = [
             f"Good day {payer.split(' ')[0]},",
             f"Please find attached your tutoring invoice for {shorten_date(cutoff_dates[0])} (inclusive) to {shorten_date(cutoff_dates[1])} (exclusive).",
-            "Kito Lee Son"
+            os.getenv("MY_NAME")
         ]
         return "\n\n".join(lines)
 
@@ -156,10 +156,10 @@ def get_latex_template(client_data, invoice_number, past_sessions, current_sessi
 
     \newcommand{{\invoiceHeader}}{{
         \begin{{flushright}}
-            \textbf{{Kito Lee Son}}\\
-            \textit{{Edmonton, AB}}\\
-            \textit{{e: kito.leeson@gmail.com}}\\
-            \textit{{p: (780) 220-2951}}
+            \textbf{{{os.getenv("MY_NAME")}}}\\
+            \textit{{{os.getenv("MY_CITY")}}}\\
+            \textit{{e: {os.getenv("MY_EMAIL")}}}\\
+            \textit{{p: {os.getenv("MY_NUMBER")}}}
         \end{{flushright}}
         
         \vspace{{2em}}
