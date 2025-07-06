@@ -36,6 +36,9 @@ def print2D(name, arr):
         print(row)
     print()
 
+def shorten_semester(semester):
+    return semester[0] + semester[-4:]
+
 # custom parsing functions
 def parse_date(serial_number):
     return datetime(1899, 12, 30) + timedelta(days=float(serial_number))
@@ -43,32 +46,34 @@ def parse_date(serial_number):
 def parse_session(row):
     return [ row[0], parse_date(row[1]), float(row[2]), float(row[3]) ]
 
+def parse_payment(row):
+    return [ row[0], parse_date(row[1]), float(row[2]) ]
+
 def parse_client(row):
     return [ row[0], int(row[1]), row[2], float(row[3]), row[4], float(row[5]), float(row[6]), row[7], row[8] ]
 
 # ----------- CORE FUNCTION -----------
-def create_and_send_invoice(name):
+def create_and_send_summary(name):
     print(name.upper())
 
     # grab info from sheet
     print("Pulling info".ljust(20, '.'), end="")
     all_sessions = sheet.get(os.getenv("SESSION_RANGE"), value_render_option='UNFORMATTED_VALUE')
     all_clients = [parse_client(row) for row in sheet.get(os.getenv("CLIENT_RANGE"))]
-    cutoff_dates = [parse_date(row[0]) for row in sheet.get(os.getenv("CUTOFF_RANGE"), value_render_option='UNFORMATTED_VALUE')]
-    invoice_number = sheet.acell(os.getenv("INVOICE_NUMBER_RANGE")).value.zfill(4)
+    semester = sheet.title
+    all_payments = sheet.get(os.getenv("PAYMENT_RANGE"), value_render_option='UNFORMATTED_VALUE')
     print("done.")
 
     # custom variables
     client_sessions = [parse_session(row) for row in all_sessions if row[0] == name] # parseFloat number values
-    current_sessions = [s for s in client_sessions if cutoff_dates[0] <= s[1] < cutoff_dates[1]]
-    past_sessions = [s for s in client_sessions if s[1] < cutoff_dates[0]]
+    client_payments = [parse_payment(row) for row in all_payments if row[0] == name]
     client_data = next(row for row in all_clients if row[0] == name)
    
     # create .tex string
     print("Writing tex".ljust(20, '.'), end="")
     initials = extract_initials(name)
-    filename = f"INV-{invoice_number}_{initials}.tex"
-    latex_content = get_latex_template(client_data, invoice_number, past_sessions, current_sessions)
+    filename = f"SUM-{shorten_semester(semester)}_{initials}.tex"
+    latex_content = get_summary_template(client_data, semester, client_sessions, client_payments)
 
     # create .tex file
     os.makedirs("invoices/", exist_ok=True)
@@ -88,29 +93,28 @@ def create_and_send_invoice(name):
 
     # send email
     pdf_path = tex_path.replace(".tex", ".pdf")
-    send_invoice_email(name, client_data[7], client_data[8], pdf_path, cutoff_dates)
+    send_summary_email(name, client_data[7], client_data[8], pdf_path, semester)
 
     # update sheet invoice number
-    sheet.update_acell(os.getenv("INVOICE_NUMBER_RANGE"), str(int(invoice_number) + 1))
-    print("Invoice Complete!", end="\n\n")
+    print("Summary Complete!", end="\n\n")
 
 # ----------- EMAIL -----------
-def send_invoice_email(name, payer, email, pdf_path, cutoff_dates):
+def send_summary_email(name, payer, email, pdf_path, semester):
     print("Sending email".ljust(20, '.'), end="")
 
-    def fill_content(payer, cutoff_dates):
+    def fill_content(payer, semester):
         lines = [
             f"Good day {payer.split(' ')[0]},",
-            f"Please find attached your tutoring invoice for {shorten_date(cutoff_dates[0])} (inclusive) to {shorten_date(cutoff_dates[1])} (exclusive).",
+            f"Please find attached your tutoring session summary for {semester}.\nPlease let me know if you have any questions, I hope to see you again next semester!",
             os.getenv("MY_NAME")
         ]
         return "\n\n".join(lines)
 
     msg = EmailMessage()
-    msg['Subject'] = f"{name} Tutoring Invoice"
+    msg['Subject'] = f"{name} Tutoring Summary {semester}"
     msg['From'] = os.getenv("MY_EMAIL")
     msg['To'] = email
-    msg.set_content(fill_content(payer, cutoff_dates))
+    msg.set_content(fill_content(payer, semester))
 
     with open(pdf_path, 'rb') as f:
         msg.add_attachment(f.read(), maintype='application', subtype='pdf', filename=os.path.basename(pdf_path))
@@ -120,19 +124,16 @@ def send_invoice_email(name, payer, email, pdf_path, cutoff_dates):
         smtp.send_message(msg)
         print("done.")
 
-def get_latex_template(client_data, invoice_number, past_sessions, current_sessions):
+def get_summary_template(client_data, semester, client_sessions, client_payments):
     # define variables
     session_rows = ""
+    payment_rows = ""
 
-    # included_sessions = past_sessions + current_sessions
-    included_sessions = current_sessions
-
-    for s in included_sessions:
+    for s in client_sessions:
         session_rows += f"{shorten_date(s[1], False)} & {s[2]} & {s[3]} \\\\"
 
-    session_total = sum(s[3] for s in included_sessions)
-    current_tab = client_data[6]
-    total_due = session_total + current_tab
+    for p in client_payments:
+        payment_rows += f"{shorten_date(p[1], False)} & {p[2]} \\\\"
 
     # create file
     return rf"""
@@ -141,52 +142,45 @@ def get_latex_template(client_data, invoice_number, past_sessions, current_sessi
     \usepackage{{booktabs}}
     \usepackage{{datetime}}
     \usepackage{{array}}
+    \usepackage{{tabularx}}
     \usepackage[dvipsnames]{{xcolor}}
 
-    \newcommand{{\invoiceNumber}}{{{invoice_number}}}
     \newcommand{{\clientName}}{{{client_data[0]}}}
     \newcommand{{\subjectsList}}{{{client_data[4]}}}
     \newcommand{{\hourlyRate}}{{{client_data[5]:.2f}}}
-    \newcommand{{\sessionCount}}{{{len(included_sessions)}}}
-    \newcommand{{\totalHours}}{{{sum(s[2] for s in included_sessions):.2f}}}
-    \newcommand{{\sessionTotal}}{{{session_total:.2f}}}
-    \newcommand{{\currentTab}}{{{current_tab:.2f}}}
-    \newcommand{{\totalAmount}}{{{total_due:.2f}}}
+    \newcommand{{\semester}}{{{semester}}}
+
+    \newcommand{{\sessionCount}}{{{len(client_sessions)}}}
+    \newcommand{{\totalHours}}{{{sum(s[2] for s in client_sessions):.2f}}}
+    \newcommand{{\sessionTotal}}{{{sum(s[3] for s in client_sessions):.2f}}}
     \newcommand{{\sessionRows}}{{{session_rows}}}
 
+    \newcommand{{\paymentCount}}{{{len(client_payments)}}}
+    \newcommand{{\paymentTotal}}{{{sum(p[2] for p in client_payments):.2f}}}
+    \newcommand{{\paymentRows}}{{{payment_rows}}}
+
     \newcommand{{\invoiceHeader}}{{
+        \begin{{minipage}}[t]{{0.48\textwidth}}        
+        \begin{{flushleft}}
+            \textbf{{Client Name:}}\\
+            \clientName\\
+            \vspace{{1em}}
+            \textbf{{Subjects:}} \subjectsList\\
+            \textbf{{Hourly Rate:}} \$\hourlyRate\\
+            \vspace{{1em}}
+            \textbf{{Semester: \semester}}\\
+        \end{{flushleft}}
+        \end{{minipage}}
+        \hfill
+        \begin{{minipage}}[t]{{0.48\textwidth}}
         \begin{{flushright}}
             \textbf{{{os.getenv("MY_NAME")}}}\\
             \textit{{{os.getenv("MY_CITY")}}}\\
             \textit{{e: {os.getenv("MY_EMAIL")}}}\\
             \textit{{p: {os.getenv("MY_NUMBER")}}}
         \end{{flushright}}
-        
+        \end{{minipage}}
         \vspace{{2em}}
-        
-        \begin{{flushleft}}
-            \textbf{{Invoice INV-\invoiceNumber}}\\
-            \textbf{{Date: \today}}\\
-            \vspace{{1em}}
-            \textbf{{Client Name:}}\\
-            \clientName\\
-            \vspace{{1em}}
-            \textbf{{Subjects:}} \subjectsList\\
-            \textbf{{Hourly Rate:}} \$\hourlyRate\\
-        \end{{flushleft}}
-        
-        \vspace{{3em}}
-    }}
-
-    % Footer with payment information
-    \newcommand{{\invoiceFooter}}{{
-        \vspace{{2em}}
-        \begin{{flushleft}}
-            \textbf{{Payment Terms:}}\\
-            Payment is due within 30 days of invoice date.\\
-            Please send an e-transfer to the email or phone number found at the top of this invoice.\\
-            Late fee of 1.5\% per month applies to unpaid balances.
-        \end{{flushleft}}
     }}
 
     % Main document
@@ -194,40 +188,54 @@ def get_latex_template(client_data, invoice_number, past_sessions, current_sessi
     \pagestyle{{empty}}
     \invoiceHeader
 
-    % Session table
+    % Side-by-side tables
+    % Sessions and payments
     \noindent
     \begin{{minipage}}[t]{{0.45\textwidth}}
+        \vspace{{0em}}
         \begin{{tabular}}{{ p{{2cm}} >{{\raggedleft\arraybackslash}}p{{1cm}} >{{\raggedleft\arraybackslash}}p{{3cm}} }}
             \toprule
-            \multicolumn{{2}}{{r}}{{\textbf{{Session Summary}}}} & \\
+            \multicolumn{{3}}{{l}}{{\textbf{{All Sessions}}}} \\
             \midrule
-            \textbf{{Date}} & \textbf{{Hours}} & \textbf{{Total}} \\
+            \textbf{{Date}} & \textbf{{Hours}} & \textbf{{Fee (\$)}} \\
             \midrule
             \sessionRows
             \midrule
-            \multicolumn{{2}}{{r}}{{\textbf{{Session Total:}}}} & \textbf{{\$\sessionTotal}} \\
+            \multicolumn{{2}}{{c}}{{\textbf{{Session Total:}}}} & \textbf{{\$\sessionTotal}} \\
             \bottomrule
         \end{{tabular}}
     \end{{minipage}}
     \hfill
     \begin{{minipage}}[t]{{0.45\textwidth}}
-        \begin{{tabular}}{{@{{}} l r @{{}}}}
+        \vspace{{0em}}
+        \begin{{tabular}}{{ p{{3.5cm}} >{{\raggedleft\arraybackslash}}p{{2.5cm}} }}
             \toprule
-            \textbf{{Invoice Summary}} & \\
+            \multicolumn{{2}}{{l}}{{\textbf{{All Payments}}}} \\
             \midrule
-            \textbf{{Sessions}} & \sessionCount \\
-            \textbf{{Total Hours}} & \totalHours \\
-            \textbf{{Hourly Rate}} & \$\hourlyRate \\
-            \textbf{{Session Total}} & \$\sessionTotal \\
-            \textbf{{Current Tab}} & \$\currentTab \\
+            \textbf{{Date}} & \textbf{{Amount (\$)}} \\
             \midrule
-            \textbf{{Total Due}} & \\
-            \textbf{{(Tab + Session Total)}} & \textbf{{\$\totalAmount}} \\
+            \paymentRows
+            \midrule
+            \textbf{{Payment Total:}} & \textbf{{\$\paymentTotal}} \\
             \bottomrule
         \end{{tabular}}
     \end{{minipage}}
+    \vspace{{3em}}
 
-    \invoiceFooter
+    \noindent
+    \begin{{tabularx}}{{\textwidth}}{{l >{{\raggedleft\arraybackslash}}X}}
+        \toprule
+        \textbf{{Semester Summary}} & \\
+        \midrule
+        \textbf{{Number of Sessions}} & \sessionCount \\
+        \textbf{{Total Hours}} & \totalHours \\
+        \textbf{{Hourly Rate}} & \$\hourlyRate \\
+        \textbf{{Session Total}} & \$\sessionTotal \\
+        \midrule
+        \textbf{{Number of Payments}} & \paymentCount \\
+        \textbf{{Total Paid}} & \paymentTotal \\
+        \bottomrule
+    \end{{tabularx}}
 
     \end{{document}}
     """
@@ -237,16 +245,10 @@ if __name__ == '__main__':
     if len(sys.argv) > 1:
         names = sys.argv[1:]
     else:
-        cutoff_dates = [parse_date(row[0]) for row in sheet.get(os.getenv("CUTOFF_RANGE"), value_render_option='UNFORMATTED_VALUE')]
-        all_sessions = sheet.get(os.getenv("SESSION_RANGE"), value_render_option='UNFORMATTED_VALUE')
-        names = set()
-        for row in all_sessions:
-            if cutoff_dates[0] <= parse_date(row[1]) < cutoff_dates[1]:
-                names.add(row[0])
-        names = list(names)
+        names = [row[0] for row in sheet.get(os.getenv("CLIENT_RANGE"))]
 
     for name in names:
-        create_and_send_invoice(name)
+        create_and_send_summary(name)
 
     # remove .aux and .log files
     for file in glob.glob("invoices/*.aux") + glob.glob("invoices/*.log"):
