@@ -61,6 +61,7 @@ def create_and_send_summary(name):
     all_sessions = sheet.get(os.getenv("SESSION_RANGE"), value_render_option='UNFORMATTED_VALUE')
     all_clients = [parse_client(row) for row in sheet.get(os.getenv("CLIENT_RANGE"))]
     semester = sheet.title
+    months = sheet.get(os.getenv("SEMESTER_RANGE"), value_render_option='UNFORMATTED_VALUE')[0][0]
     all_payments = sheet.get(os.getenv("PAYMENT_RANGE"), value_render_option='UNFORMATTED_VALUE')
     print("done.")
 
@@ -73,7 +74,7 @@ def create_and_send_summary(name):
     print("Writing tex".ljust(20, '.'), end="")
     initials = extract_initials(name)
     filename = f"SUM-{shorten_semester(semester)}_{initials}.tex"
-    latex_content = get_summary_template(client_data, semester, client_sessions, client_payments)
+    latex_content = get_summary_template(client_data, semester, months, client_sessions, client_payments)
 
     # create .tex file
     os.makedirs("invoices/", exist_ok=True)
@@ -124,7 +125,7 @@ def send_summary_email(name, payer, email, pdf_path, semester):
         smtp.send_message(msg)
         print("done.")
 
-def get_summary_template(client_data, semester, client_sessions, client_payments):
+def get_summary_template(client_data, semester, months, client_sessions, client_payments):
     # define variables
     session_rows = ""
     payment_rows = ""
@@ -134,6 +135,12 @@ def get_summary_template(client_data, semester, client_sessions, client_payments
 
     for p in client_payments:
         payment_rows += f"{shorten_date(p[1], False)} & {p[2]} \\\\"
+
+    summaryID = rf"{shorten_semester(semester)}\_{extract_initials(client_data[0])}"
+
+    sessionTotal = sum(s[3] for s in client_sessions)
+    paymentTotal = sum(p[2] for p in client_payments)
+    balance = sessionTotal - paymentTotal
 
     # create file
     return rf"""
@@ -145,23 +152,27 @@ def get_summary_template(client_data, semester, client_sessions, client_payments
     \usepackage{{tabularx}}
     \usepackage[dvipsnames]{{xcolor}}
 
+    \newcommand{{\summaryID}}{{{summaryID}}}
     \newcommand{{\clientName}}{{{client_data[0]}}}
     \newcommand{{\subjectsList}}{{{client_data[4]}}}
     \newcommand{{\hourlyRate}}{{{client_data[5]:.2f}}}
     \newcommand{{\semester}}{{{semester}}}
+    \newcommand{{\months}}{{{months}}}
 
     \newcommand{{\sessionCount}}{{{len(client_sessions)}}}
     \newcommand{{\totalHours}}{{{sum(s[2] for s in client_sessions):.2f}}}
-    \newcommand{{\sessionTotal}}{{{sum(s[3] for s in client_sessions):.2f}}}
+    \newcommand{{\sessionTotal}}{{{sessionTotal:.2f}}}
     \newcommand{{\sessionRows}}{{{session_rows}}}
 
     \newcommand{{\paymentCount}}{{{len(client_payments)}}}
-    \newcommand{{\paymentTotal}}{{{sum(p[2] for p in client_payments):.2f}}}
+    \newcommand{{\paymentTotal}}{{{paymentTotal:.2f}}}
     \newcommand{{\paymentRows}}{{{payment_rows}}}
+    \newcommand{{\balance}}{{{balance}}}
 
     \newcommand{{\invoiceHeader}}{{
         \begin{{minipage}}[t]{{0.48\textwidth}}        
         \begin{{flushleft}}
+            \textbf{{Summary \summaryID}}\\
             \textbf{{Client Name:}}\\
             \clientName\\
             \vspace{{1em}}
@@ -175,9 +186,12 @@ def get_summary_template(client_data, semester, client_sessions, client_payments
         \begin{{minipage}}[t]{{0.48\textwidth}}
         \begin{{flushright}}
             \textbf{{{os.getenv("MY_NAME")}}}\\
+            \textit{{Independent Tutor}}\\
             \textit{{{os.getenv("MY_CITY")}}}\\
             \textit{{e: {os.getenv("MY_EMAIL")}}}\\
-            \textit{{p: {os.getenv("MY_NUMBER")}}}
+            \textit{{p: {os.getenv("MY_NUMBER")}}}\\
+            \vspace{{2em}}
+            \textbf{{Months Included: \months}}\\
         \end{{flushright}}
         \end{{minipage}}
         \vspace{{2em}}
@@ -233,7 +247,9 @@ def get_summary_template(client_data, semester, client_sessions, client_payments
         \textbf{{Session Total}} & \$\sessionTotal \\
         \midrule
         \textbf{{Number of Payments}} & \paymentCount \\
-        \textbf{{Total Paid}} & \paymentTotal \\
+        \textbf{{Total Paid}} & \$\paymentTotal \\
+        \midrule
+        \textbf{{Final Balance}} & \$\balance \\
         \bottomrule
     \end{{tabularx}}
 
