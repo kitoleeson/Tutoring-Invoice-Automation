@@ -70,8 +70,9 @@ def create_and_send_invoice(name):
     latex_content = get_invoice_template(client_data, invoice_number, current_sessions)
 
     # create .tex file
-    os.makedirs("invoices/", exist_ok=True)
-    tex_path = os.path.join("invoices/", filename)
+    invoice_folder = f"invoices/{sheet.title}/"
+    os.makedirs(invoice_folder, exist_ok=True)
+    tex_path = os.path.join(invoice_folder, filename)
     with open(tex_path, "w") as f:
         f.write(latex_content)
     print("done.")
@@ -79,7 +80,7 @@ def create_and_send_invoice(name):
     # compile .tex into .pdf file
     print("Compiling pdf".ljust(20, '.'), end="")
     subprocess.run(
-        ["pdflatex", "-output-directory", "invoices/", tex_path],
+        ["pdflatex", "-output-directory", invoice_folder, tex_path],
         check=True,
         stdout=subprocess.DEVNULL  # suppress stdout
     )
@@ -89,15 +90,30 @@ def create_and_send_invoice(name):
     pdf_path = tex_path.replace(".tex", ".pdf")
     send_invoice_email(name, client_data[7], client_data[8], pdf_path, cutoff_dates)
 
+    # ADD FUNCTION TO UPLOAD PDF INVOICE TO DRIVE FOR STORAGE (or NAS)
+    # upload pdf to google drive
+    # drive_folder = os.getenv("INVOICE_FOLDER_KEY")
+    # upload_to_drive(pdf_path, drive_folder)
+
     # update sheet invoice number
     sheet.update_acell(os.getenv("INVOICE_NUMBER_RANGE"), str(int(invoice_number) + 1))
     print("Invoice Complete!", end="\n\n")
 
-# ----------- EMAIL -----------
+
+# ----------- EMAIL AND DRIVE -----------
 def send_invoice_email(name, payer, email, pdf_path, cutoff_dates):
     print("Sending email".ljust(20, '.'), end="")
 
-    def fill_content(payer, cutoff_dates):
+    def fill_content(name, payer, cutoff_dates):
+        # lines = [
+        #     f"Good evening {payer.split(' ')[0]},",
+        #     f"I'd like to welcome you to a new semester of schooling and a new semester of tutoring for {name.split(' ')[0]}.",
+        #     "Throughout last semester, I built a new invoice system to help me keep my billing simple and consistent. Here's what to expect going forward:\n\t-  Invoices will now be sent biweekly directly to your email.\n\t-  Payment is due within 10 days from the day you receive the invoice.\n\t-  All fees can be paid via eTransfer using the email and phone number listed on each invoice.",
+        #     "I'd also like to remind you that my sessions are billed in increments of 15 mins, rounded up or down to the nearest 0.25 hours; and that your hourly rate will never change from the rate originally set when we began working together -- even if my rates go up for new clients, yours will remain the same.",
+        #     f"Please find attached your first tutoring invoice of the semester, for {shorten_date(cutoff_dates[0])} (inclusive) to {shorten_date(cutoff_dates[1])} (exclusive).",
+        #     "Please feel free to reach out if you have any questions regarding invoices, payments, or scheduling.\nI appreciate your trust and support, and I'm excited to see the progress this semester will bring!",
+        #     os.getenv("MY_NAME")
+        # ]
         lines = [
             f"Good day {payer.split(' ')[0]},",
             f"Please find attached your tutoring invoice for {shorten_date(cutoff_dates[0])} (inclusive) to {shorten_date(cutoff_dates[1])} (exclusive).",
@@ -109,7 +125,7 @@ def send_invoice_email(name, payer, email, pdf_path, cutoff_dates):
     msg['Subject'] = f"{name} Tutoring Invoice"
     msg['From'] = os.getenv("MY_EMAIL")
     msg['To'] = email
-    msg.set_content(fill_content(payer, cutoff_dates))
+    msg.set_content(fill_content(name, payer, cutoff_dates))
 
     with open(pdf_path, 'rb') as f:
         msg.add_attachment(f.read(), maintype='application', subtype='pdf', filename=os.path.basename(pdf_path))
@@ -179,7 +195,7 @@ def get_invoice_template(client_data, invoice_number, current_sessions):
         \vspace{{2em}}
         \begin{{flushleft}}
             \textbf{{Payment Terms:}}\\
-            Payment is due within 30 days of invoice date.\\
+            Payment is due within 10 days of invoice date.\\
             Please send an e-transfer to the email or phone number found at the top of this invoice.\\
             Late fee of 1.5\% per month applies to unpaid balances.
         \end{{flushleft}}
@@ -246,5 +262,5 @@ if __name__ == '__main__':
         create_and_send_invoice(name)
 
     # remove .aux and .log files
-    for file in glob.glob("invoices/*.aux") + glob.glob("invoices/*.log"):
+    for file in glob.glob(f"invoices/{sheet.title}/*.aux") + glob.glob(f"invoices/{sheet.title}/*.log"):
         os.remove(file)
