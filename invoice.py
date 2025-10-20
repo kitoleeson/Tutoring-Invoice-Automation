@@ -95,6 +95,15 @@ def create_and_send_invoice(name):
     # drive_folder = os.getenv("INVOICE_FOLDER_KEY")
     # upload_to_drive(pdf_path, drive_folder)
 
+    # remove '!' from payer name in sheet (if necessary)
+    if client_data[7][-1] == '!':
+        print("Updating payer".ljust(20, '.'), end="")
+        for i, row in enumerate(all_clients):
+            if row[7] == client_data[7]:
+                sheet.update_acell(f"{chr(ord(os.getenv("CLIENT_RANGE")[0]) + 7)}{i + int(os.getenv("CLIENT_RANGE")[1])}", client_data[7][:-1])
+                print("done.")
+                break
+
     # update sheet invoice number
     sheet.update_acell(os.getenv("INVOICE_NUMBER_RANGE"), str(int(invoice_number) + 1))
     print("Invoice Complete!", end="\n\n")
@@ -114,11 +123,22 @@ def send_invoice_email(name, payer, email, pdf_path, cutoff_dates):
         #     "Please feel free to reach out if you have any questions regarding invoices, payments, or scheduling.\nI appreciate your trust and support, and I'm excited to see the progress this semester will bring!",
         #     os.getenv("MY_NAME")
         # ]
-        lines = [
-            f"Good day {payer.split(' ')[0]},",
-            f"Please find attached your tutoring invoice for {shorten_date(cutoff_dates[0])} (inclusive) to {shorten_date(cutoff_dates[1])} (exclusive).",
-            os.getenv("MY_NAME")
-        ]
+        if payer[-1] == '!':
+            lines = [
+                f"Good evening {payer.split(' ')[0]},",
+                f"I'd like to welcome you to a new semester of tutoring for {name.split(' ')[0]}.",
+                "Throughout last semester, I built a new invoice system to help me keep my billing simple and consistent. Here's what to expect going forward:\n\t-  Invoices will be sent biweekly directly to your email.\n\t-  Payment is due within 10 days from the day you receive the invoice.\n\t-  All fees can be paid via eTransfer using the email and phone number listed on each invoice.",
+                "I'd also like to inform/remind you that my sessions are billed in increments of 15 mins, rounded up or down to the nearest 0.25 hours; and that your hourly rate will never change from the rate originally set when we began working together -- even if my rates go up for new clients, yours will remain the same.",
+                f"Please find attached your first tutoring invoice of the semester, for {shorten_date(cutoff_dates[0])} (inclusive) to {shorten_date(cutoff_dates[1])} (exclusive).",
+                "Please feel free to reach out if you have any questions regarding invoices, payments, or scheduling.\nI appreciate your trust and support, and I'm excited to see the progress this semester will bring!",
+                os.getenv("MY_NAME")
+            ]
+        else:
+            lines = [
+                f"Good day {payer.split(' ')[0]},",
+                f"Please find attached your tutoring invoice for {shorten_date(cutoff_dates[0])} (inclusive) to {shorten_date(cutoff_dates[1])} (exclusive).",
+                os.getenv("MY_NAME")
+            ]
         return "\n\n".join(lines)
 
     msg = EmailMessage()
